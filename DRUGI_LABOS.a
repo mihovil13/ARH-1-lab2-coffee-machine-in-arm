@@ -1,0 +1,355 @@
+        ORG 0
+        B GLAVNI
+        ORG 0X18; ZA IRQ
+        B PREKID
+
+GLAVNI ;INICIJALIZIRAM STOGOVE
+        MSR CPSR, #0B11010010;IRQ
+        MOV R13, #0X10000
+        MSR CPSR, #0B11010011;SVC
+        MOV R13, #0XFC00
+        MRS R0, CPSR
+        BIC R0, R0, #0B10000000
+        MSR CPSR, R0
+        BL INITRTC;INICIJALIZACIJA RTC-A
+        BL I_GPIO1;INICIJALIZACIJA GPIO1
+        BL I_GPIO2;INICIJALIZACIJA GPIO2
+        ;DEFAULT JE STANJE 1
+PETLJA  
+        
+        LDR R2, OBAVILI ;LABELA OBAVILI - SLUŽI NAM ZA PROVJERU JEL SMO OBAVILI INICIJALIZACIJU
+        CMP R2, #0
+        BLEQ ST_1
+        LDR R3, GPIO2
+        LDR R3, [R3]
+        ANDS R3, R3, #0B1
+        LDRNE R0, KRENULO ;LABELA KRENULO - SLUŽI NAM ZA REGISTIRANJE PRITISKA GUMBA
+        ADDNE R0, R0, #1
+        STRNE R0, KRENULO
+        LDR R1, KRENULO
+        CMP R1, #1
+        BLHI ST_6
+        BLHI PETLJA
+        BNE PETLJA 
+        LDR R2, JESAM ;LABELA JESAM - SLUŽI KAKO NE BI BESPOTREBNO ULAZILI PONOVO U STANJE
+        CMP R2, #1
+        BEQ PETLJA
+           
+        LDR R2, OBAVILI ;LABELA OBAVILI - SLUŽI NAM ZA PROVJERU JEL SMO OBAVILI INICIJALIZACIJU
+        CMP R2, #0;TU JU PONOVO KORISTIMO U SLUČAJU DA SMO ZAVRŠILI CIKLUS, INAČE BI NAKON 'GOTOVO' PISALO 'PRIPREMA' PA TEK ONDA 'SPREMNO'
+        BLEQ PETLJA
+        LDR R0, T_ST
+        CMP R0, #2 
+        BLEQ ST_2
+        CMP R0, #3
+        BLEQ ST_3
+        CMP R0, #4
+        BLEQ ST_4
+        CMP R0, #5
+        BLEQ ST_5
+        CMP R0, #6
+        BLEQ ST_6
+        B PETLJA
+        
+        
+
+INITRTC STMFD SP!, {R0, R1, R2}
+        LDR R0, RTC
+        MOV R1, #0
+        STR R1, [R0, #0XC]
+        MOV R2, #30 ;TREBA TI 30 SEKUNDI, RTC IMA 1HZ FREKVENCIJU
+        STR R2, [R0, #0X4]
+        MOV R1, #1
+        STR R1, [R0, #0X10]
+        LDMFD SP!, {R0, R1, R2}
+        MOV PC, LR
+
+I_GPIO1 STMFD SP!, {R0, R1}
+        LDR R0, GPIO1;KORISTIŠ ZA LCD, VRATA B
+        MOV R1, #0B0
+        STR R1, [R0, #8]
+        LDMFD SP!, {R0, R1}
+        MOV PC, LR
+
+
+I_GPIO2 STMFD SP!, {R0, R1}
+        LDR R0, GPIO2; KORISTIŠ ZA LED, VRATA A
+        MOV R1, #0B11100000
+        STR R1, [R0, #8]
+        MOV R1, #0B0
+        STR R1, [R0]
+        LDMFD SP!, {R0, R1}
+        MOV PC, LR
+        
+LCDWR   STMFD R13!, {R0, R3} ;DIO KODA IZ SLUŽBENIH PREZENTACIJA
+        AND R0, R0, #0x7F ; postavi bit 7 u nulu (za svaki slučaj, jer
+        ; u R0 je tu mogla biti 1) i pošalji znak
+        STRB R0, [R1]
+        ORR R0, R0, #0x80 ; postavi bit 7 u jedan (podigni impuls)
+        STRB R0, [R1]
+        AND R0, R0, #0x7F ; postavi bit 7 u nulu (spusti impuls)
+        STRB R0, [R1]
+        LDMFD R13!, {R0, R3}
+        MOV PC, LR ; povratak
+
+ST_1    STMFD SP!, {R0, R1, LR};TREBAMO ISKLJUČITI SVE TRI LEDICE, ISPIS: SPREMNO
+        LDR R1, GPIO2
+        MOV R0, #0B0
+        STR R0, [R1];ISKLJUČIL SI LEDICE
+        ;DIO ZA LCD
+        LDR R1, GPIO1
+        ADD R1, R1, #4
+        MOV R0, #0X0D;BRIŠEŠ ULAZNI REGISTAR
+        BL LCDWR
+        MOV R0, #0X53;'S'
+        BL LCDWR
+        MOV R0, #0X50;'P'
+        BL LCDWR
+        MOV R0, #0X52;'R'
+        BL LCDWR
+        MOV R0, #0X45;'E'
+        BL LCDWR
+        MOV R0, #0X4D;'M'
+        BL LCDWR
+        MOV R0, #0X4E;'N'
+        BL LCDWR
+        MOV R0, #0X4F;'O'
+        BL LCDWR
+        MOV R0, #0X0A;ISPIS ZNAKOVA NA ZASLON
+        BL LCDWR
+        MOV R0, #1
+        STR R0, OBAVILI
+        LDMFD SP!, {R0, R1, LR}
+        MOV PC, LR
+
+ST_2    STMFD SP!, {R0, R1, LR};TREBAMO UKLJUČITI CRVENU LEDICU, ISPIS: PRIPREMA
+        LDR R0, RTC
+        MOV R1, #0
+        STR R1, [R0, #0XC]
+        ;SAD ĆE NAM CIKLUS TRAJATI 30 SEKUNDI
+        LDR R1, GPIO2
+        ORR R0, R1, #0B00100000;POSTAVIL SI CRVENU LEDICU, OSTALO JE TAK KAK JE BILO
+        STR R0, [R1]
+        ;DIO ZA LCD
+        LDR R1, GPIO1
+        ADD R1, R1, #4
+        MOV R0, #0X0D;BRIŠEŠ ULAZNI REGISTAR
+        BL LCDWR
+        MOV R0, #0X50;'P'
+        BL LCDWR
+        MOV R0, #0X52;'R'
+        BL LCDWR
+        MOV R0, #0X49;'I'
+        BL LCDWR
+        MOV R0, #0X50;'P'
+        BL LCDWR
+        MOV R0, #0X52;'R'
+        BL LCDWR
+        MOV R0, #0X45;'E'
+        BL LCDWR
+        MOV R0, #0X4D;'M'
+        BL LCDWR
+        MOV R0, #0X41;'A'
+        BL LCDWR
+        MOV R0, #0X0A;ISPIS ZNAKOVA NA ZASLON
+        BL LCDWR
+        MOV R0, #1
+        STR R0, JESAM
+        ;PROVJERA AKO NAM SE IZVRŠAVAO OVAJ KOD, A STISNULI SMO OPET TIPKU PA TREBA DOĆI DO POGREŠKE
+        LDR R3, GPIO2
+        LDR R3, [R3]
+        ANDS R3, R3, #0B1
+        LDRNE R0, KRENULO
+        ADDNE R0, R0, #1
+        STRNE R0, KRENULO
+        LDR R0, KRENULO
+        CMP R0, #1
+        BLHI ST_6
+        ;
+        LDMFD SP!, {R0, R1, LR}
+        MOV PC, LR
+
+ST_3    STMFD SP!, {R0, R1, LR};TREBAMO UKLJUČITI ŽUTU LEDICU, ISPIS NE MIJENJAMO
+        LDR R1, GPIO2
+        ORR R0, R1, #0B01100000;POSTAVIL SI ŽUTU LEDICU, OSTALO JE TAK KAK JE BILO
+        STR R0, [R1]
+        MOV R0, #1
+        STR R0, JESAM
+        ;PROVJERA AKO NAM SE IZVRŠAVAO OVAJ KOD, A STISNULI SMO OPET TIPKU PA TREBA DOĆI DO POGREŠKE
+        LDR R3, GPIO2
+        LDR R3, [R3]
+        ANDS R3, R3, #0B1
+        LDRNE R0, KRENULO
+        ADDNE R0, R0, #1
+        STRNE R0, KRENULO
+        LDR R0, KRENULO
+        CMP R0, #1
+        BLHI ST_6
+        ;
+        LDMFD SP!, {R0, R1, LR}
+        MOV PC, LR
+
+ST_4    STMFD SP!, {R0, R1, LR};TREBAMO UKLJUČITI ZELENU LEDICU, ISPIS NE MIJENJAMO
+        LDR R1, GPIO2
+        ORR R0, R1, #0B11100000;POSTAVIL SI ZELENU LEDICU, OSTALO JE TAK KAK JE BILO
+        STR R0, [R1]
+        MOV R0, #1
+        STR R0, JESAM
+        ;PROVJERA AKO NAM SE IZVRŠAVAO OVAJ KOD, A STISNULI SMO OPET TIPKU PA TREBA DOĆI DO POGREŠKE
+        LDR R3, GPIO2
+        LDR R3, [R3]
+        ANDS R3, R3, #0B1
+        LDRNE R0, KRENULO
+        ADDNE R0, R0, #1
+        STRNE R0, KRENULO
+        LDR R0, KRENULO
+        CMP R0, #1
+        BLHI ST_6
+        ;
+        LDMFD SP!, {R0, R1, LR}
+        MOV PC, LR
+
+ST_5    STMFD SP!, {R0, R1, R2, LR};
+        LDR R1, GPIO2
+        LDR R2, DULJ_5
+        ANDS R2, R2, #0B1;POMNOŽI GA S BINARNOM JEDINICIOM, AKO JE NULA ONDA JE PARNI CIKLUS
+        MOVEQ R0, #0B11100000
+        MOVNE R0, #0B0
+        STR R0, [R1]
+        ;DIO ZA LCD
+        LDR R2, DULJ_5;LABELA DULJ_5 - SLUŽI ZA PROVJERU CIKLUSA PETOG STANJA
+        CMP R2, #0
+        BNE PRESKOK ;AKO SMO U PRVOM CIKLUSU STANJA, ISPIŠI GOTOVO, INAČE PRESKOK
+        LDR R1, GPIO1
+        ADD R1, R1, #4
+        MOV R0, #0X0D;BRIŠEŠ ULAZNI REGISTAR
+        BL LCDWR
+        MOV R0, #0X47;'G'
+        BL LCDWR
+        MOV R0, #0X4F;'O'
+        BL LCDWR
+        MOV R0, #0X54;'T'
+        BL LCDWR
+        MOV R0, #0X4F;'O'
+        BL LCDWR
+        MOV R0, #0X56;'V'
+        BL LCDWR
+        MOV R0, #0X4F;'O'
+        BL LCDWR
+        MOV R0, #0X0A;ISPIS ZNAKOVA NA ZASLON
+        BL LCDWR
+PRESKOK MOV R0, #1
+        STR R0, JESAM
+        ;PROVJERA AKO NAM SE IZVRŠAVAO OVAJ KOD, A STISNULI SMO OPET TIPKU PA TREBA DOĆI DO POGREŠKE
+        LDR R3, GPIO2
+        LDR R3, [R3]
+        ANDS R3, R3, #0B1
+        LDRNE R0, KRENULO
+        ADDNE R0, R0, #1
+        STRNE R0, KRENULO
+        LDR R0, KRENULO
+        CMP R0, #1
+        BLHI ST_6
+        ;
+        LDMFD SP!, {R0, R1, R2, LR}
+        MOV PC, LR
+
+ST_6    STMFD SP!, {R0, R1, R2, LR};
+        MOV R1, #1
+        STR R1, KRENULO;RESETIRAJ KRENULO
+        MOV R1, #6
+        STR R1, T_ST
+        LDR R2, DULJ_6
+        CMP R2, #0
+        LDREQ R0, RTC;1.
+        MOVEQ R1, #0;2.
+        STREQ R1, [R0, #0XC];3. OVE TRI GORNJE LINIJE SLUŽE ZA RESETIRANJE TAJMERA UKOLIKO DOĐE DO POGREŠKE
+        ANDS R2, R2, #0B1;POMNOŽI GA S BINARNOM JEDINICIOM, AKO JE NULA ONDA JE PARNI CIKLUS
+        MOVEQ R0, #0B00100000
+        MOVNE R0, #0B0
+        LDR R1, GPIO2
+        STR R0, [R1]
+        ;DIO ZA LCD
+        LDR R2, DULJ_6; LABELA DULJ_6 - SLUŽI ZA PROVJERU CIKLUSA ŠESTOG STANJA
+        CMP R2, #0
+        BNE SKOKK ;AKO SMO U PRVOM CIKLUSU STANJA, ISPIŠI GOTOVO, INAČE SKOKK
+        LDR R1, GPIO1
+        ADD R1, R1, #4
+        MOV R0, #0X0D;BRIŠEŠ ULAZNI REGISTAR
+        BL LCDWR
+        MOV R0, #0X47;'G'
+        BL LCDWR
+        MOV R0, #0X52;'R'
+        BL LCDWR
+        MOV R0, #0X45;'E'
+        BL LCDWR
+        MOV R0, #0X53;'S'
+        BL LCDWR
+        MOV R0, #0X4B;'K'
+        BL LCDWR
+        MOV R0, #0X41;'A'
+        BL LCDWR
+        MOV R0, #0X0A;ISPIS ZNAKOVA NA ZASLON
+        BL LCDWR
+SKOKK   MOV R0, #1
+        STR R0, JESAM
+        LDMFD SP!, {R0, R1, R2, LR}
+        MOV PC, LR
+
+
+
+PREKID  STMFD SP!, {R0, R1, R2}
+        LDR R0, RTC
+        STR R1, [R0, #0X8]
+        MOV R1, #0
+        STR R1, [R0, #0XC]
+        ;DIO ZA MIJENJANJE STANJA - MIJENJAŠ SAMO AKO JE KRENULO = 1
+        LDR R2, KRENULO
+        CMP R2, #1
+        BNE SKOK
+        LDR R0, T_ST
+        CMP R0, #6
+        BNE NIJE_6
+        LDREQ R0, DULJ_6
+        ADD R0, R0, #1
+        STR R0, DULJ_6
+        CMP R0, #6
+        MOVEQ R0, #0
+        STREQ R0, DULJ_6
+        MOVEQ R0, #2
+        STREQ R0, T_ST
+        MOVEQ R1, #0
+        STREQ R1, OBAVILI
+        MOVEQ R1, #0
+        STREQ R1, KRENULO
+        STREQ R1, DULJ_5;AKO SE PREKID DOGODIO USRED IZVEDBE 5. STANJA
+        MOV R0, #0
+        STR R0, JESAM
+        B SKOK;AKO JE 6 NE POVEĆAVAMO STANJE
+NIJE_6  CMP R0, #5
+        ADDNE R0, R0, #1;POVEĆAJ AKO NIJE PET
+        LDREQ R1, DULJ_5
+        ADDEQ R1, R1, #1
+        CMPEQ R1, #6
+        STRNE R1, DULJ_5;SPREMI UPDEJTANO AKO NISMO ZAVRŠILI
+        MOVEQ R1, #0
+        STREQ R1, KRENULO;RESETIRAJ KRENULO
+        MOVEQ R0, #0
+        STREQ R0, OBAVILI
+        STREQ R1, DULJ_5
+        MOVEQ R0, #2
+        STR R0, T_ST
+        MOV R0, #0
+        STR R0, JESAM
+SKOK    LDMFD SP!, {R0, R1, R2}
+        SUBS PC, LR, #4 
+
+GPIO1   DW 0XFFFF0F00
+GPIO2   DW 0XFFFF0B00
+RTC     DW 0XFFFF0E00
+T_ST    DW 2
+DULJ_5  DW 0
+DULJ_6  DW 0
+JESAM   DW 0
+KRENULO DW 0
+OBAVILI DW 0
